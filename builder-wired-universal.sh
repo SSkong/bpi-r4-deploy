@@ -94,6 +94,13 @@ bash ../scripts/custom-packages.sh
 
 ./scripts/feeds update -a
 
+# 版本墙修复（Run#2 失败根因）：官方 packages feed 的 sing-box(1.13.21) 旧于
+# luci-app-homeproxy 的 sing-box>=1.14.0 硬约束，同名包竞争中旧版胜出导致
+# apk 依赖解析失败（unable to select packages → package/install Error 2）。
+# 删除后由 package/custom(1.14.1, XiaoHaiSly 配套版) 或
+# passwall_packages(1.14.3) 提供满足约束的版本。
+rm -rf feeds/packages/net/sing-box
+
 ./scripts/feeds install -a
 
 \cp ../my_files/fit.sh package/utils/fitblk/files/fit.sh
