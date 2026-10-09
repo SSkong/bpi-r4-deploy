@@ -30,14 +30,6 @@ git clone --branch main https://github.com/mediatek/mtk-openwrt-feeds mtk-openwr
 
 cd openwrt
 
-# ============================================================
-# 自定义：科学上网全家桶 feed (kenzok8/small-package)
-# 如需锁定版本，可 pin commit：
-#   src-git smpackage https://github.com/kenzok8/small-package.git^<commit>
-# ============================================================
-grep -q "smpackage" feeds.conf.default 2>/dev/null || \
-  echo "src-git smpackage https://github.com/kenzok8/small-package" >> feeds.conf.default
-
 bash ../mtk-openwrt-feeds/autobuild/unified/autobuild.sh filogic prepare
 
 
@@ -96,17 +88,13 @@ chmod +x files/root/install-dir/install-nvme.sh
 \cp ../my_files/bpi-r4-install/install-emmc.sh files/root/install-dir/install-emmc.sh
 chmod +x files/root/install-dir/install-emmc.sh
 
+# 自定义包注入（清单驱动）：代理四源 src-git + git clone 到 package/custom/
+# 添加新包三步：CLONE_LIST 加一行 / defconfig 加 =y / custom-packages.list 加一行
+bash ../scripts/custom-packages.sh
+
 ./scripts/feeds update -a
 
-# small-package 中与官方 feed 冲突的基础包，官方 README 建议删除，
-# 否则可能互相覆盖导致编译报错（删的是 smpackage 目录下的同名包，
-# 官方 feed 的同名包仍会正常安装，不影响构建）
-rm -rf feeds/smpackage/{base-files,dnsmasq,firewall,firewall4,fullconenat,fullconenat-nft,libnftnl,nftables,ppp,opkg,ucl,uclibc++,upx,vsftpd,miniupnpd-iptables,wireless-regdb} 2>/dev/null || true
-
 ./scripts/feeds install -a
-
-# 显式安装科学上网全家桶（依赖自动解析；运行时只启用一个，避免端口冲突）
-./scripts/feeds install luci-app-passwall luci-app-passwall2 luci-app-ssr-plus luci-app-homeproxy luci-app-nikki sing-box 2>/dev/null || true
 
 \cp ../my_files/fit.sh package/utils/fitblk/files/fit.sh
 
@@ -122,6 +110,21 @@ make defconfig
 echo "CONFIG_PACKAGE_trusted-firmware-a-mt7988-emmc-comb-4bg=y" >> .config
 echo "CONFIG_PACKAGE_trusted-firmware-a-mt7988-sdmmc-comb-4bg=y" >> .config
 echo "CONFIG_PACKAGE_trusted-firmware-a-mt7988-spim-nand-ubi-comb-4bg=y" >> .config
+
+# 自定义包选入校验：defconfig 会静默丢弃无效/缺失包的开关，
+# 逐包检查 custom-packages.list 中所有包是否已选入，缺失即报错退出，
+# 防止"看起来编了其实没编"
+MISSING=""
+while IFS= read -r pkg; do
+  case "$pkg" in ''|'#'*) continue ;; esac
+  grep -q "^CONFIG_PACKAGE_${pkg}=y$" .config || MISSING="${MISSING} ${pkg}"
+done < ../scripts/custom-packages.list
+if [ -n "$MISSING" ]; then
+  echo "ERROR: 以下自定义包未选入 .config（检查 clone/源声明/包名）:${MISSING}"
+  exit 1
+fi
+
+echo "===== 自定义包全部校验通过 ====="
 
 bash ../mtk-openwrt-feeds/autobuild/unified/autobuild.sh filogic build
 

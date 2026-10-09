@@ -535,7 +535,10 @@ CONFIG_PACKAGE_smp_util=y
 CONFIG_PACKAGE_kmod-nft-compat=y
 
 # ============================================================
-# 科学上网全家桶（kenzok8/small-package 提供）
+# 科学上网全家桶
+# 来源：passwall/passwall2/helloworld 代理 feeds（src-git）
+#      + package/custom/ 编译前 git clone（nikki/homeproxy/smartdns）
+# 详见 scripts/custom-packages.sh 与 scripts/custom-packages.list
 # 全家桶共存策略：全部编入固件，运行时只启用一个，避免端口/dns 冲突
 # ============================================================
 CONFIG_PACKAGE_luci-app-passwall=y

@@ -9,7 +9,7 @@
 | 构建变体 | standard/wired × 4GB/8GB/PoE + Pro 8X + UniFi | 仅 wired 4GB（主设备 + lean NAND installer） |
 | 构建脚本 | 2 个 builder | `builder-wired-universal.sh` |
 | Release | 12+ 个 tag | 仅 `release-4gb-wired` |
-| 额外包 | 无 | passwall / passwall2 / ssr-plus / homeproxy / nikki / sing-box / smartdns / chinadns-ng（来自 [kenzok8/small-package](https://github.com/kenzok8/small-package)） |
+| 额外包 | 无 | passwall / passwall2 / ssr-plus / homeproxy / nikki / sing-box / smartdns / chinadns-ng（代理 feeds + 编译前 git clone 清单驱动，见下方"自定义包说明"） |
 
 固件基座不变：OpenWrt `openwrt-25.12` + MediaTek `mtk-openwrt-feeds` main，版本锁定在 **`build-versions.env`**（版本真源，两个 commit 必须成对升级）。
 
@@ -46,9 +46,18 @@
 
 ## 自定义包说明
 
-- 全家桶全部编入固件，**运行时只启用一个**（passwall / passwall2 / ssr-plus / homeproxy / nikki 选一），避免 DNS/端口冲突；smartdns / chinadns-ng 可作分流前置
-- 冲突处理：`builder-wired-universal.sh` 在 `feeds update` 后会删除 smpackage 中与官方 feed 重名的基础包（base-files/dnsmasq/firewall 等，small-package 官方建议做法）
-- 新增包的通用套路：`feeds.conf.default` 追加源 → builder 里 `feeds install` → `configs/my_defconfig-wired-universal` 加 `CONFIG_PACKAGE_xxx=y`
+采用**编译前 git clone 清单驱动**模式（移植自 VIKINGYFY/OpenWRT-CI，同 bpi-r4-openwrt-builder 仓库）：
+
+- **代理四源**（`scripts/custom-packages.sh` 注入 src-git）：`passwall` / `passwall2` / `passwall_packages`（xray、sing-box、hysteria 等核心）/ `helloworld`（ssr-plus、chinadns-ng）
+- **CLONE_LIST clone** 到 `package/custom/`（并发 8 限流 + 逐包 Makefile 校验）：`OpenWrt-nikki`（luci-app-nikki + nikki）、`luci-app-homeproxy`（XiaoHaiSly 修复版，含 sing-box 打包）、`luci-app-smartdns`；smartdns 本体由官方 packages feed 提供
+- **双重校验**：clone 后检查 Makefile 存在；`make defconfig` 后按 `scripts/custom-packages.list` 逐包校验已选入 `.config`（defconfig 会静默丢弃缺失包的开关，缺失即构建失败，防止"看起来编了其实没编"）
+
+添加新自定义包的标准三步：
+1. `scripts/custom-packages.sh` 的 CLONE_LIST 加一行：`目录名|仓库URL|分支`
+2. `configs/my_defconfig-wired-universal` 加 `CONFIG_PACKAGE_<包名>=y`
+3. `scripts/custom-packages.list` 加一行包名
+
+全家桶全部编入固件，**运行时只启用一个**（passwall / passwall2 / ssr-plus / homeproxy / nikki 选一），避免 DNS/端口冲突；smartdns / chinadns-ng 可作分流前置。
 
 ## 本地构建（可选）
 
