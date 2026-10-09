@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Editor backups / temp
+*~
+*.swp
+
+# OpenWrt build tree (local builds)
+/openwrt/
+/mtk-openwrt-feeds/
+/rel-*/

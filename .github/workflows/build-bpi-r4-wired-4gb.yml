@@ -1,0 +1,145 @@
+# BPI-R4 wired 4GB 专用构建（精简自 woziwrt/bpi-r4-deploy）
+#
+# 版本真源：build-versions.env（加载后覆盖 builder 脚本内默认值）。
+# 构建产物发布到唯一 release tag: release-4gb-wired
+#   - bpi-r4.itb                       (sysupgrade)
+#   - bananapi_bpi-r4-nvme-img.bin     (NVMe 安装镜像)
+#   - bananapi_bpi-r4-sdcard.img.gz    (SD 卡启动盘)
+#   - bananapi_bpi-r4-emmc-img.bin     (eMMC 安装镜像)
+#   - bananapi_bpi-r4-nand-snand-img.bin (lean NAND installer)
+#   - rescued SD 镜像 + sha256sums + config.buildinfo
+name: Build BPI-R4 Wired 4GB
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_commit:
+        description: 'Commit hash of this repository (leave empty for latest)'
+        required: false
+        default: ''
+      openwrt_commit:
+        description: 'OpenWrt commit hash (leave empty to use build-versions.env)'
+        required: false
+        default: ''
+      mtk_commit:
+        description: 'MTK SDK commit hash (leave empty to use build-versions.env)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: release-4gb-wired
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.repo_commit || github.sha }}
+
+      - name: Load build versions
+        run: |
+          grep -v '^\s*#' build-versions.env | grep -v '^\s*$' >> $GITHUB_ENV
+          [ -n "${{ github.event.inputs.openwrt_commit }}" ] && echo "OPENWRT_COMMIT=${{ github.event.inputs.openwrt_commit }}" >> $GITHUB_ENV || true
+          [ -n "${{ github.event.inputs.mtk_commit }}" ] && echo "MTK_COMMIT=${{ github.event.inputs.mtk_commit }}" >> $GITHUB_ENV || true
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext libncurses-dev libssl-dev python3-distutils python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget libelf-dev ccache git
+
+      - name: Run builder script
+        run: |
+          chmod +x ./builder-wired-universal.sh
+          ./builder-wired-universal.sh
+        env:
+          OPENWRT_COMMIT: ${{ env.OPENWRT_COMMIT }}
+          MTK_COMMIT: ${{ env.MTK_COMMIT }}
+
+      - name: Prepare release artifacts
+        run: |
+          FILOGIC="openwrt/bin/targets/mediatek/filogic"
+          DIR="rel-4gb-wired"
+          mkdir -p "$DIR"
+
+          cp "${FILOGIC}/openwrt-mediatek-filogic-bananapi_bpi-r4-squashfs-sysupgrade.itb" \
+             "${DIR}/bpi-r4.itb"
+          cp "${FILOGIC}/openwrt-mediatek-filogic-bananapi_bpi-r4-nvme-img.bin"       "${DIR}/"
+          cp "${FILOGIC}/openwrt-mediatek-filogic-bananapi_bpi-r4-sdcard.img.gz"      "${DIR}/"
+          cp "${FILOGIC}/openwrt-mediatek-filogic-bananapi_bpi-r4-emmc-img.bin"       "${DIR}/"
+          cp "${FILOGIC}/openwrt-mediatek-filogic-bananapi_bpi-r4-nand-snand-img.bin" "${DIR}/"
+          cp "${FILOGIC}/config.buildinfo" "${DIR}/"
+          cp rescue/bpi-r4-rescue-sdcard.img.gz "$DIR/"
+
+          cd "$DIR"
+          sha256sum bpi-r4.itb \
+            openwrt-mediatek-filogic-bananapi_bpi-r4-nvme-img.bin \
+            openwrt-mediatek-filogic-bananapi_bpi-r4-sdcard.img.gz \
+            openwrt-mediatek-filogic-bananapi_bpi-r4-emmc-img.bin \
+            openwrt-mediatek-filogic-bananapi_bpi-r4-nand-snand-img.bin > sha256sums
+
+      # 原子替换：构建成功后才删旧 release，失败不影响现有固件
+      - name: Delete existing release and tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+
+            const releases = await github.rest.repos.listReleases({
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            for (const rel of releases.data) {
+              if (rel.tag_name === tag) {
+                await github.rest.repos.deleteRelease({
+                  owner,
+                  repo,
+                  release_id: rel.id
+                }).catch(e => console.log(`Failed to delete release ${rel.id}: ${e.message}`));
+              }
+            }
+            await github.rest.git.deleteRef({
+              owner,
+              repo,
+              ref: `tags/${tag}`
+            }).catch(e => console.log(`Failed to delete tag: ${e.message}`));
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release-4gb-wired
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release-4gb-wired
+          name: "BPI-R4 4GB wired (latest)"
+          body: |
+            Variant: wired (no WiFi) | RAM: 4GB | 科学上网全家桶: passwall/passwall2/ssr-plus/homeproxy/nikki/sing-box
+
+            安装：SD 刷机 → install-nand.sh（选 4GB）→ install-nvme.sh 选 2（4GB wired）或 install-emmc.sh 选 2
+
+            Commit: ${{ github.event.inputs.repo_commit || github.sha }}
+          files: rel-4gb-wired/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
